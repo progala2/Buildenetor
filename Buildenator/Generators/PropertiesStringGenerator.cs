@@ -6,18 +6,12 @@ using Buildenator.Configuration.Contract;
 
 namespace Buildenator.Generators;
 
-internal sealed class PropertiesStringGenerator
+internal sealed class PropertiesStringGenerator(IBuilderProperties builder, IEntityToBuild entity)
 {
-	private readonly IBuilderProperties _builder;
-	private readonly IEntityToBuild _entity;
+	private readonly IBuilderProperties _builder = builder;
+	private readonly IEntityToBuild _entity = entity;
 
-	public PropertiesStringGenerator(IBuilderProperties builder, IEntityToBuild entity)
-	{
-		_builder = builder;
-		_entity = entity;
-	}
-
-	public string GeneratePropertiesCode()
+    public string GeneratePropertiesCode()
 	{
 		var properties = _entity.AllUniqueSettablePropertiesAndParameters;
 
@@ -28,12 +22,12 @@ internal sealed class PropertiesStringGenerator
 
 		var output = new StringBuilder();
 
-		foreach (var typedSymbol in properties.Where(IsNotYetDeclaredField))
+		foreach (var typedSymbol in properties.Where(p => IsNotYetDeclaredField(p)))
 		{
             output = output.AppendLine($@"        private {typedSymbol.GenerateLazyFieldType()} {typedSymbol.UnderScoreName};");
 		}
 
-		foreach (var typedSymbol in properties.Where(IsNotYetDeclaredMethod))
+		foreach (var typedSymbol in properties.Where(p => IsNotYetDeclaredMethod(p)))
 		{
             output = output.AppendLine($@"
 
@@ -43,26 +37,26 @@ internal sealed class PropertiesStringGenerator
 
 		return output.ToString();
 
-		bool IsNotYetDeclaredField(ITypedSymbol x) => !_builder.Fields.TryGetValue(x.UnderScoreName, out _);
+		bool IsNotYetDeclaredField(in TypedSymbol x) => !_builder.Fields.TryGetValue(x.UnderScoreName, out _);
 
-		bool IsNotYetDeclaredMethod(ITypedSymbol x) => !_builder.BuildingMethods.TryGetValue(CreateMethodName(x), out var method)
-		                                               || !(method.Parameters.Length == 1 && method.Parameters[0].Type.Name == x.TypeName);
+		bool IsNotYetDeclaredMethod(in TypedSymbol x) => !_builder.BuildingMethods.TryGetValue(CreateMethodName(x), out var method)
+		                                               || !(method.ParametersLength == 1 && method.FirstParameterTypeName == x.TypeName);
 	}
 
-	private string GenerateMethodDefinition(ITypedSymbol typedSymbol)
+	private string GenerateMethodDefinition(in TypedSymbol typedSymbol)
 		=> $@"{GenerateMethodDefinitionHeader(typedSymbol)}
         {{
             {GenerateValueAssignment(typedSymbol)};
             return this;
         }}";
 
-	private string GenerateMethodDefinitionHeader(ITypedSymbol typedSymbol)
+	private string GenerateMethodDefinitionHeader(in TypedSymbol typedSymbol)
 		=> $"public {_builder.FullName} {CreateMethodName(typedSymbol)}({typedSymbol.GenerateMethodParameterDefinition()})";
 
-	private static string GenerateValueAssignment(ITypedSymbol typedSymbol)
-		=> typedSymbol.IsMockable()
+	private static string GenerateValueAssignment(in TypedSymbol typedSymbol)
+		=> typedSymbol.IsMockable
 			? $"{DefaultConstants.SetupActionLiteral}({typedSymbol.UnderScoreName})"
 			: $"{typedSymbol.UnderScoreName} = new {DefaultConstants.NullBox}<{typedSymbol.TypeFullName}>({DefaultConstants.ValueLiteral})";
 
-	private string CreateMethodName(ITypedSymbol property) => $"{_builder.BuildingMethodsPrefix}{property.SymbolPascalName}";
+	private string CreateMethodName(in TypedSymbol property) => $"{_builder.BuildingMethodsPrefix}{property.SymbolPascalName}";
 }

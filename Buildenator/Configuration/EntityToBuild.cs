@@ -7,56 +7,44 @@ using System.Linq;
 using Buildenator.Abstraction;
 using Buildenator.Diagnostics;
 using System.Text;
+using System;
+using System.Collections.Immutable;
 
 namespace Buildenator.Configuration;
 
-internal sealed class EntityToBuild : IEntityToBuild
+internal sealed class EntityToBuild : IEntityToBuild, IEquatable<EntityToBuild>
 {
     public string Name { get; }
     public string FullName { get; }
     public string FullNameWithConstraints { get; }
     public Constructor? ConstructorToBuild { get; }
-    public IReadOnlyList<ITypedSymbol> AllUniqueSettablePropertiesAndParameters => _uniqueTypedSymbols;
-    public IReadOnlyList<ITypedSymbol> AllUniqueReadOnlyPropertiesWithoutConstructorsParametersMatch => _uniqueReadOnlyTypedSymbols;
-    public string[] AdditionalNamespaces { get; }
+    public IReadOnlyList<TypedSymbol> AllUniqueSettablePropertiesAndParameters => _uniqueTypedSymbols;
+    public IReadOnlyList<TypedSymbol> AllUniqueReadOnlyPropertiesWithoutConstructorsParametersMatch => _uniqueReadOnlyTypedSymbols;
+    public ImmutableArray<string> AdditionalNamespaces { get; }
     public IEnumerable<BuildenatorDiagnostic> Diagnostics => _diagnostics;
     public NullableStrategy NullableStrategy { get; }
 
     public EntityToBuild(
-        INamedTypeSymbol typeForBuilder,
-        IMockingProperties? mockingConfiguration,
-        IFixtureProperties? fixtureConfiguration,
+        in EntityDataProxy entityToBuildSymbol,
+        in MockingProperties? mockingConfiguration,
+        in FixtureProperties? fixtureConfiguration,
         NullableStrategy nullableStrategy,
         string? staticFactoryMethodName)
     {
-        INamedTypeSymbol? entityToBuildSymbol;
-        var additionalNamespaces = Enumerable.Empty<string>();
-        if (typeForBuilder.IsGenericType)
-        {
-            entityToBuildSymbol = typeForBuilder.ConstructedFrom;
-            additionalNamespaces = entityToBuildSymbol.TypeParameters.Where(a => a.ConstraintTypes.Any())
-                .SelectMany(a => a.ConstraintTypes).Select(a => a.ContainingNamespace.ToDisplayString())
-                .ToArray();
-        }
-        else
-        {
-            entityToBuildSymbol = typeForBuilder;
-        }
+        AdditionalNamespaces = entityToBuildSymbol.AdditionalNamespaces;
 
-        AdditionalNamespaces = additionalNamespaces.ToArray();
         Name = entityToBuildSymbol.Name;
-        FullName = entityToBuildSymbol.ToDisplayString(new SymbolDisplayFormat(genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters, typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces));
-        FullNameWithConstraints = entityToBuildSymbol.ToDisplayString(new SymbolDisplayFormat(
-            genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters | SymbolDisplayGenericsOptions.IncludeTypeConstraints | SymbolDisplayGenericsOptions.IncludeVariance));
+        FullName = entityToBuildSymbol.FullName;
+        FullNameWithConstraints = entityToBuildSymbol.FullNameWithConstraints;
 
         ConstructorToBuild = Constructor.CreateConstructorOrDefault(entityToBuildSymbol, mockingConfiguration, fixtureConfiguration, nullableStrategy, staticFactoryMethodName);
         (_properties, _uniqueReadOnlyTypedSymbols) = DividePropertiesBySetability(entityToBuildSymbol, mockingConfiguration, fixtureConfiguration, nullableStrategy);
         _uniqueTypedSymbols = _properties;
         if (ConstructorToBuild is not null)
         {
-            _properties = _properties.Where(x => !ConstructorToBuild.ContainsParameter(x.SymbolName)).ToList();
-            _uniqueTypedSymbols = [.. _properties, .. ConstructorToBuild.Parameters];
-            _uniqueReadOnlyTypedSymbols = _uniqueReadOnlyTypedSymbols.Where(x => !ConstructorToBuild.ContainsParameter(x.SymbolName)).ToList();
+            _properties = _properties.Where(x => !ConstructorToBuild.ContainsParameter(x.SymbolName)).ToImmutableArray();
+            _uniqueTypedSymbols = _properties.Concat(ConstructorToBuild.Parameters).ToImmutableArray();
+            _uniqueReadOnlyTypedSymbols = _uniqueReadOnlyTypedSymbols.Where(x => !ConstructorToBuild.ContainsParameter(x.SymbolName)).ToImmutableArray();
         }
 
         NullableStrategy = nullableStrategy;
@@ -119,14 +107,22 @@ internal sealed class EntityToBuild : IEntityToBuild
         }
     }
 
-    private static (TypedSymbol[] Settable, TypedSymbol[] ReadOnly) DividePropertiesBySetability(
-        INamedTypeSymbol entityToBuildSymbol, IMockingProperties? mockingConfiguration,
-        IFixtureProperties? fixtureConfiguration, NullableStrategy nullableStrategy)
+    private static (ImmutableArray<TypedSymbol> Settable, ImmutableArray<TypedSymbol> ReadOnly) DividePropertiesBySetability(
+        in EntityDataProxy entityToBuildSymbol, in MockingProperties? mockingConfiguration,
+        in FixtureProperties? fixtureConfiguration, NullableStrategy nullableStrategy)
     {
-        var (settable, readOnly) = entityToBuildSymbol.DividePublicPropertiesBySetability();
-        return (
-            settable.Select(a => new TypedSymbol(a, mockingConfiguration, fixtureConfiguration, nullableStrategy)).ToArray(),
-            readOnly.Select(a => new TypedSymbol(a, mockingConfiguration, fixtureConfiguration, nullableStrategy)).ToArray());
+        var settableList = new List<TypedSymbol>();
+        foreach(var settableProperty in entityToBuildSymbol.SettableProperties)
+        {
+            settableList.Add(new TypedSymbol(settableProperty, mockingConfiguration, fixtureConfiguration, nullableStrategy));
+        }
+        var unsettableList = new List<TypedSymbol>();
+        foreach (var unsettableProperty in entityToBuildSymbol.UnsettableProperties)
+        {
+            unsettableList.Add(new TypedSymbol(unsettableProperty, mockingConfiguration, fixtureConfiguration, nullableStrategy));
+        }
+
+        return (settableList.ToImmutableArray(), unsettableList.ToImmutableArray());
     }
 
     public string GenerateDefaultBuildsCode()
@@ -136,7 +132,7 @@ internal sealed class EntityToBuild : IEntityToBuild
 
         var moqInit = ConstructorToBuild.Parameters
             .Concat(_properties)
-            .Where(symbol => symbol.IsMockable())
+            .Where(symbol => symbol.IsMockable)
             .Select(s => $@"            {s.GenerateFieldInitialization()}")
             .Aggregate(new StringBuilder(), (builder, s) => builder.AppendLine(s))
             .ToString();
@@ -179,43 +175,49 @@ internal sealed class EntityToBuild : IEntityToBuild
         }
     }
 
-    private readonly IReadOnlyList<TypedSymbol> _uniqueReadOnlyTypedSymbols;
-    private readonly IReadOnlyList<TypedSymbol> _uniqueTypedSymbols;
-    private readonly IReadOnlyList<TypedSymbol> _properties;
-    private readonly List<BuildenatorDiagnostic> _diagnostics = [];
+    public bool Equals(EntityToBuild? other)
+    {
+        if (other is null) return false;
+        return other.FullNameWithConstraints == FullNameWithConstraints
+            && (other.ConstructorToBuild is null && ConstructorToBuild is null || other.ConstructorToBuild is not null && other.ConstructorToBuild.Equals(ConstructorToBuild))
+            && other.NullableStrategy == NullableStrategy
+            && other._properties.SequenceEqual(_properties)
+            && other.AdditionalNamespaces.SequenceEqual(AdditionalNamespaces);
+    }
 
-    internal abstract class Constructor(IReadOnlyDictionary<string, TypedSymbol> constructorParameters)
+    private readonly ImmutableArray<TypedSymbol> _uniqueReadOnlyTypedSymbols;
+    private readonly ImmutableArray<TypedSymbol> _uniqueTypedSymbols;
+    private readonly ImmutableArray<TypedSymbol> _properties;
+    private readonly ImmutableArray<BuildenatorDiagnostic> _diagnostics = ImmutableArray.Create<BuildenatorDiagnostic>();
+
+    internal abstract class Constructor(IReadOnlyDictionary<string, TypedSymbol> constructorParameters) : IEquatable<Constructor>
     {
         public static Constructor? CreateConstructorOrDefault(
-            INamedTypeSymbol entityToBuildSymbol,
-            IMockingProperties? mockingConfiguration,
-            IFixtureProperties? fixtureConfiguration,
+            EntityDataProxy entityToBuildSymbol,
+            MockingProperties? mockingConfiguration,
+            FixtureProperties? fixtureConfiguration,
             NullableStrategy nullableStrategy,
             string? staticFactoryMethodName)
         {
-            IEnumerable<IMethodSymbol> constructors;
+            ImmutableArray<ConstructorDataProxy> constructors;
             if (staticFactoryMethodName is null)
             {
-                constructors = entityToBuildSymbol.Constructors.Select(a => a);
+                constructors = entityToBuildSymbol.Constructors;
             }
             else
             {
-                constructors = entityToBuildSymbol.GetMembers(staticFactoryMethodName).OfType<IMethodSymbol>().Where(a => a.IsStatic);
+                constructors = entityToBuildSymbol.StaticMethods;
             }
 
-            var onlyPublicConstructors = constructors
-                .Where(m => m.DeclaredAccessibility == Accessibility.Public || m.DeclaredAccessibility == Accessibility.Internal)
-                .ToList();
-
-            if (onlyPublicConstructors.Count == 0)
+            if (constructors.Length == 0)
                 return default;
 
-            var selectedConstructor = onlyPublicConstructors
+            var selectedConstructor = constructors
                             .OrderByDescending(x => x.Parameters.Length)
                             .First();
             var parameters = selectedConstructor
                 .Parameters
-                .ToDictionary(x => x.PascalCaseName(), s => new TypedSymbol(s, mockingConfiguration, fixtureConfiguration, nullableStrategy));
+                .ToDictionary(x => x.PascalCaseName, s => new TypedSymbol(s, mockingConfiguration, fixtureConfiguration, nullableStrategy));
 
             return staticFactoryMethodName is null
                 ? new ObjectConstructor(parameters)
@@ -225,14 +227,28 @@ internal sealed class EntityToBuild : IEntityToBuild
         public IReadOnlyDictionary<string, TypedSymbol> ConstructorParameters { get; } = constructorParameters;
 
         public bool ContainsParameter(string parameterName) => ConstructorParameters.ContainsKey(parameterName);
+
+        public bool Equals(Constructor? other)
+        {
+            if (other is null) return false;
+            if (other.ConstructorParameters.Count != ConstructorParameters.Count) return false;
+            return other.ConstructorParameters.All(p => ConstructorParameters.TryGetValue(p.Key, out var value) && value == p.Value);
+        }
+
         public IEnumerable<TypedSymbol> Parameters => ConstructorParameters.Values;
     }
 
-    internal sealed class ObjectConstructor(IReadOnlyDictionary<string, TypedSymbol> constructorParameters) : Constructor(constructorParameters) { }
+    internal sealed class ObjectConstructor(IReadOnlyDictionary<string, TypedSymbol> constructorParameters)
+        : Constructor(constructorParameters), IEquatable<ObjectConstructor>
+    {
+        public bool Equals(ObjectConstructor? other) => base.Equals(other);
+    }
 
     internal sealed class StaticConstructor(IReadOnlyDictionary<string, TypedSymbol> constructorParameters, string name)
-        : Constructor(constructorParameters)
+        : Constructor(constructorParameters), IEquatable<StaticConstructor>
     {
         public string Name { get; } = name;
+
+        public bool Equals(StaticConstructor? other) => other?.Name == Name && base.Equals(other);
     }
 }

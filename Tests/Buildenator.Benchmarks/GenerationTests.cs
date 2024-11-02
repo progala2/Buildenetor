@@ -49,10 +49,10 @@ public class GenerationTests
     private static readonly SyntaxTree ComplicatedSource2 = CSharpSyntaxTree.ParseText(GenerateEntityAndBuilder(30));
     private static readonly SyntaxTree ComplicatedSource3 = CSharpSyntaxTree.ParseText(GenerateEntityAndBuilder(30));
 
-    private static readonly PortableExecutableReference[] References = {
+    private static readonly PortableExecutableReference[] References = [
         MetadataReference.CreateFromFile(typeof(Binder).GetTypeInfo().Assembly.Location),
         MetadataReference.CreateFromFile(typeof(MakeBuilderAttribute).GetTypeInfo().Assembly.Location)
-    };
+    ];
 
     private static string GenerateEntityAndBuilder(int entityCount = 3, int propertiesCount = 10)
     {

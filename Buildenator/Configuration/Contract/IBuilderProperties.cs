@@ -2,15 +2,16 @@
 using Buildenator.Diagnostics;
 using Microsoft.CodeAnalysis;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 
 namespace Buildenator.Configuration.Contract;
 
 internal interface IBuilderProperties
 {
-    IReadOnlyDictionary<string, IMethodSymbol> BuildingMethods { get; }
+    IReadOnlyDictionary<string, MethodDataProxy> BuildingMethods { get; }
     string BuildingMethodsPrefix { get; }
     string ContainingNamespace { get; }
-    IReadOnlyDictionary<string, IFieldSymbol> Fields { get; }
+    IImmutableDictionary<string, FieldDataProxy> Fields { get; }
     string FullName { get; }
     string Name { get; }
     NullableStrategy NullableStrategy { get; }

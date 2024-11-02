@@ -1,4 +1,5 @@
-﻿using Buildenator.Configuration.Contract;
+﻿using Buildenator.Configuration;
+using Buildenator.Configuration.Contract;
 using System.Linq;
 using System.Text;
 
@@ -9,7 +10,7 @@ internal static class ConstructorsGenerator
     internal static string GenerateConstructor(
         string builderName,
         IEntityToBuild entity,
-        IFixtureProperties? fixtureConfiguration)
+        in FixtureProperties? fixtureConfiguration)
     {
             var hasAnyBody = false;
             var parameters = entity.AllUniqueSettablePropertiesAndParameters;
@@ -24,9 +25,9 @@ internal static class ConstructorsGenerator
                 hasAnyBody = true;
             }
 
-            if (fixtureConfiguration is not null && fixtureConfiguration.NeedsAdditionalConfiguration())
+            if (fixtureConfiguration is FixtureProperties fixtureProperties && fixtureProperties.NeedsAdditionalConfiguration())
             {
-                output = output.AppendLine($@"            {fixtureConfiguration.GenerateAdditionalConfiguration()};");
+                output = output.AppendLine($@"            {fixtureProperties.GenerateAdditionalConfiguration()};");
                 hasAnyBody = true;
             }
 

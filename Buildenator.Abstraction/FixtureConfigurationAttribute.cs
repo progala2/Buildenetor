@@ -30,7 +30,7 @@ public abstract class FixtureConfigurationAttribute : Attribute
         string? additionalNamespaces = null)
     {
             Strategy = strategy;
-            AdditionalNamespaces = additionalNamespaces?.Split(',') ?? Array.Empty<string>();
+            AdditionalNamespaces = additionalNamespaces?.Split(',') ?? [];
         }
 
     public FixtureInterfacesStrategy Strategy { get; }

@@ -1,6 +1,8 @@
-﻿namespace Buildenator.Generators;
+﻿using System.Collections.Immutable;
+
+namespace Buildenator.Generators;
 
 internal interface IAdditionalNamespacesProvider
 {
-    string[] AdditionalNamespaces { get; }
+    ImmutableArray<string> AdditionalNamespaces { get; }
 }

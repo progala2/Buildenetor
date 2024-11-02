@@ -4,26 +4,24 @@ using Microsoft.CodeAnalysis;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using Buildenator.Extensions;
-using System.Linq;
 using Buildenator.Diagnostics;
 
 namespace Buildenator.Configuration;
 
-internal readonly struct BuilderProperties : IBuilderProperties
+internal readonly record struct BuilderProperties : IBuilderProperties
 {
-    private readonly Dictionary<string, IMethodSymbol> _buildingMethods;
-    private readonly Dictionary<string, IFieldSymbol> _fields;
+    private readonly Dictionary<string, MethodDataProxy> _buildingMethods;
+    private readonly ImmutableDictionary<string, FieldDataProxy> _fields;
     private readonly List<BuildenatorDiagnostic> _diagnostics = [];
 
     public static BuilderProperties Create(
-        INamespaceOrTypeSymbol builderSymbol,
-        MakeBuilderAttributeInternal builderAttribute,
-        ImmutableArray<TypedConstant>? globalAttributes,
+        in BuilderDataProxy builderSymbol,
+        in MakeBuilderDataProxy builderAttribute,
+        in GlobalMakeBuilderDataProxy? globalAttributes,
         bool nullableAnnotaionEnabled)
     {
         string? defaultNameWith = null;
-        bool? defaultStaticBuilder = null;
+        bool? generateDefaultBuildMethod = null;
         NullableStrategy? nullableStrategy = null;
         bool? generateMethodsForUnreachableProperties = null;
         bool? implicitCast = null;
@@ -31,15 +29,15 @@ internal readonly struct BuilderProperties : IBuilderProperties
 
         if (globalAttributes.HasValue)
         {
-            defaultNameWith = globalAttributes.Value.GetOrThrow<string>(0, nameof(MakeBuilderAttributeInternal.BuildingMethodsPrefix));
-            defaultStaticBuilder = globalAttributes.Value.GetOrThrow<bool>(1, nameof(MakeBuilderAttributeInternal.GenerateDefaultBuildMethod));
-            nullableStrategy = globalAttributes.Value.GetOrThrow<NullableStrategy>(2, nameof(MakeBuilderAttributeInternal.NullableStrategy));
-            generateMethodsForUnreachableProperties = globalAttributes.Value.GetOrThrow<bool>(3, nameof(MakeBuilderAttributeInternal.GenerateMethodsForUnreachableProperties));
-            implicitCast = globalAttributes.Value.GetOrThrow<bool>(4, nameof(MakeBuilderAttributeInternal.ImplicitCast));
-            generateStaticPropertyForBuilderCreation = globalAttributes.Value.GetOrThrow<bool>(5, nameof(MakeBuilderAttributeInternal.GenerateStaticPropertyForBuilderCreation));
+            defaultNameWith = globalAttributes.Value.BuildingMethodsPrefix;
+            generateDefaultBuildMethod = globalAttributes.Value.GenerateDefaultBuildMethod;
+            nullableStrategy = globalAttributes.Value.NullableStrategy;
+            generateMethodsForUnreachableProperties = globalAttributes.Value.GenerateMethodsForUnreachableProperties;
+            implicitCast = globalAttributes.Value.ImplicitCast;
+            generateStaticPropertyForBuilderCreation = globalAttributes.Value.GenerateStaticPropertyForBuilderCreation;
         }
 
-        nullableStrategy = builderAttribute.NullableStrategy is null ? nullableStrategy: builderAttribute.NullableStrategy;
+        nullableStrategy = builderAttribute.NullableStrategy is null ? nullableStrategy : builderAttribute.NullableStrategy;
 
         if ((nullableStrategy is null || nullableStrategy == NullableStrategy.Default) && nullableAnnotaionEnabled)
         {
@@ -48,10 +46,10 @@ internal readonly struct BuilderProperties : IBuilderProperties
 
 
         return new BuilderProperties(builderSymbol,
-            new MakeBuilderAttributeInternal(
+            new MakeBuilderDataProxy(
                 builderAttribute.TypeForBuilder,
                 builderAttribute.BuildingMethodsPrefix ?? defaultNameWith,
-                builderAttribute.GenerateDefaultBuildMethod ?? defaultStaticBuilder,
+                builderAttribute.GenerateDefaultBuildMethod ?? generateDefaultBuildMethod,
                 nullableStrategy,
                 builderAttribute.GenerateMethodsForUnreachableProperties ??
                 generateMethodsForUnreachableProperties,
@@ -60,17 +58,17 @@ internal readonly struct BuilderProperties : IBuilderProperties
                 builderAttribute.GenerateStaticPropertyForBuilderCreation ?? generateStaticPropertyForBuilderCreation));
     }
 
-    private BuilderProperties(INamespaceOrTypeSymbol builderSymbol, MakeBuilderAttributeInternal attributeData)
+    private BuilderProperties(in BuilderDataProxy builderSymbol, in MakeBuilderDataProxy attributeData)
     {
-        ContainingNamespace = builderSymbol.ContainingNamespace.ToDisplayString();
+        ContainingNamespace = builderSymbol.ContainingNamespace;
         Name = builderSymbol.Name;
-        FullName = builderSymbol.ToDisplayString(new SymbolDisplayFormat(genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters));
+        FullName = builderSymbol.FullName;
         BuildingMethodsPrefix = attributeData.BuildingMethodsPrefix ?? DefaultConstants.BuildingMethodsPrefix;
         NullableStrategy = attributeData.NullableStrategy ?? NullableStrategy.Default;
         GenerateDefaultBuildMethod = attributeData.GenerateDefaultBuildMethod ?? true;
         ImplicitCast = attributeData.ImplicitCast ?? false;
         ShouldGenerateMethodsForUnreachableProperties = attributeData.GenerateMethodsForUnreachableProperties ?? false;
-        OriginalLocation = builderSymbol.Locations.First();
+        OriginalLocation = builderSymbol.FirstLocation;
         StaticFactoryMethodName = attributeData.StaticFactoryMethodName;
         GenerateStaticPropertyForBuilderCreation = attributeData.GenerateStaticPropertyForBuilderCreation ?? false;
 
@@ -78,37 +76,33 @@ internal readonly struct BuilderProperties : IBuilderProperties
             throw new ArgumentNullException(nameof(attributeData), "Prefix name shouldn't be empty!");
 
         _buildingMethods = [];
-        _fields = [];
-        var members = builderSymbol.GetMembers();
-        foreach (var member in members)
+        foreach (var method in builderSymbol.Methods)
         {
-            switch (member)
+            switch (method)
             {
-                case IMethodSymbol { MethodKind: MethodKind.Ordinary } method
+                case { MethodKind: MethodKind.Ordinary }
                 when method.Name.StartsWith(BuildingMethodsPrefix)
                 && method.Name != DefaultConstants.BuildMethodName:
                     _buildingMethods.Add(method.Name, method);
                     break;
-                case IMethodSymbol { MethodKind: MethodKind.Ordinary, Name: DefaultConstants.PostBuildMethodName }:
+                case { MethodKind: MethodKind.Ordinary, Name: DefaultConstants.PostBuildMethodName }:
                     IsPostBuildMethodOverriden = true;
                     break;
-                case IMethodSymbol { MethodKind: MethodKind.Ordinary, Name: DefaultConstants.BuildMethodName, Parameters.Length: 0 }:
+                case { MethodKind: MethodKind.Ordinary, Name: DefaultConstants.BuildMethodName, ParametersLength: 0 }:
                     IsBuildMethodOverriden = true;
                     _diagnostics.Add(new BuildenatorDiagnostic(
                         BuildenatorDiagnosticDescriptors.BuildMethodOverridenDiagnostic,
                         OriginalLocation));
                     break;
-                case IMethodSymbol { MethodKind: MethodKind.Constructor, Parameters.Length: 0, IsImplicitlyDeclared: false }:
+                case { MethodKind: MethodKind.Constructor, ParametersLength: 0, IsImplicitlyDeclared: false }:
                     IsDefaultConstructorOverriden = true;
                     _diagnostics.Add(new BuildenatorDiagnostic(
                         BuildenatorDiagnosticDescriptors.DefaultConstructorOverridenDiagnostic,
                         OriginalLocation));
                     break;
-                case IFieldSymbol field:
-                    _fields.Add(field.Name, field);
-                    break;
             }
         }
+        _fields = builderSymbol.Fields.ToImmutableDictionary(f => f.Name);
     }
 
     public string ContainingNamespace { get; }
@@ -126,8 +120,8 @@ internal readonly struct BuilderProperties : IBuilderProperties
     public string? StaticFactoryMethodName { get; }
     public bool GenerateStaticPropertyForBuilderCreation { get; }
 
-    public IReadOnlyDictionary<string, IMethodSymbol> BuildingMethods => _buildingMethods;
-    public IReadOnlyDictionary<string, IFieldSymbol> Fields => _fields;
+    public IReadOnlyDictionary<string, MethodDataProxy> BuildingMethods => _buildingMethods;
+    public IImmutableDictionary<string, FieldDataProxy> Fields => _fields;
 
     public IEnumerable<BuildenatorDiagnostic> Diagnostics => _diagnostics;
 }

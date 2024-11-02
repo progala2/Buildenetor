@@ -19,7 +19,6 @@ using Buildenator.Diagnostics;
 [assembly: InternalsVisibleTo("DynamicProxyGenAssembly2")]
 
 namespace Buildenator;
-
 /// <inheritdoc />
 [Generator]
 public class BuildersGenerator : IIncrementalGenerator
@@ -36,12 +35,12 @@ public class BuildersGenerator : IIncrementalGenerator
             {
                 var attributes = ctx.TargetSymbol.GetAttributes();
                 return (
-                BuilderSymbol: (INamedTypeSymbol)ctx.TargetSymbol,
-                BuilderAttribute: new MakeBuilderAttributeInternal(
+                BuilderSymbol: new BuilderDataProxy((INamedTypeSymbol)ctx.TargetSymbol),
+                BuilderAttribute: new MakeBuilderDataProxy(
                     attributes.Single(
                         attributeData => attributeData.AttributeClass?.Name == nameof(MakeBuilderAttribute))),
-                MockingAttribute: GetMockingConfigurationOrDefault(attributes),
-                FixtureAttribute: GetLocalFixturePropertiesOrDefault(attributes)
+                MockingAttribute: MockingProperties.CreateOrDefault(GetMockingConfigurationOrDefault(attributes)),
+                FixtureAttribute: FixtureProperties.CreateOrDefault(GetLocalFixturePropertiesOrDefault(attributes))
                         );
             }
         );
@@ -71,9 +70,13 @@ public class BuildersGenerator : IIncrementalGenerator
             {
                 var globalFixtureProperties = assembly.Fixture?.ConstructorArguments;
                 var mockingConfigurationBuilder = assembly.Mocking?.ConstructorArguments;
-                var globalBuilderProperties = assembly.Builder?.ConstructorArguments;
+                var globalBuilderProperties = assembly.Builder;
 
-                return (globalFixtureProperties, mockingConfigurationBuilder, globalBuilderProperties);
+                return (
+                FixtureProperties.CreateOrDefault(globalFixtureProperties),
+                MockingProperties.CreateOrDefault(mockingConfigurationBuilder),
+                GlobalMakeBuilderDataProxy.CreateOrDefault(globalBuilderProperties)
+                );
             });
 
         var generators = classSymbols
@@ -132,7 +135,7 @@ public class BuildersGenerator : IIncrementalGenerator
         {
             productionContext.ReportDiagnostic(
                 new BuildenatorDiagnostic(BuildenatorDiagnosticDescriptors.AbstractDiagnostic,
-                    tuple.BuilderSymbol.Locations.First(),
+                    tuple.BuilderSymbol.FirstLocation,
                     tuple.TypeForBuilder.Name)
                 );
         });

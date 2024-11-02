@@ -1,6 +1,4 @@
 ﻿using Buildenator.Abstraction;
-using Buildenator.CodeAnalysis;
-using Buildenator.Configuration.Contract;
 using System.Collections.Generic;
 using Buildenator.Configuration;
 using static Buildenator.Generators.NamespacesGenerator;
@@ -12,18 +10,18 @@ namespace Buildenator.Generators;
 
 internal sealed class BuilderSourceStringGenerator
 {
-    private readonly IBuilderProperties _builder;
-    private readonly IEntityToBuild _entity;
-    private readonly IFixtureProperties? _fixtureConfiguration;
-    private readonly IMockingProperties? _mockingConfiguration;
+    private readonly BuilderProperties _builder;
+    private readonly EntityToBuild _entity;
+    private readonly FixtureProperties? _fixtureConfiguration;
+    private readonly MockingProperties? _mockingConfiguration;
     private readonly PropertiesStringGenerator _propertiesStringGenerator;
     private readonly List<BuildenatorDiagnostic> _diagnostics = [];
 
     public BuilderSourceStringGenerator(
-        IBuilderProperties builder,
-        IEntityToBuild entity,
-        IFixtureProperties? fixtureConfiguration,
-        IMockingProperties? mockingConfiguration)
+        in BuilderProperties builder,
+        EntityToBuild entity,
+        in FixtureProperties? fixtureConfiguration,
+        in MockingProperties? mockingConfiguration)
     {
         _builder = builder;
         _entity = entity;
@@ -64,7 +62,7 @@ namespace {_builder.ContainingNamespace}
 {{
 {GenerateGlobalNullable()}{GenerateBuilderDefinition()}
     {{
-{(_fixtureConfiguration is null ? string.Empty : $"        private readonly {_fixtureConfiguration.Name} {DefaultConstants.FixtureLiteral} = new {_fixtureConfiguration.Name}({_fixtureConfiguration.ConstructorParameters});")}
+{(_fixtureConfiguration is FixtureProperties fixtureProperties ? $"        private readonly {fixtureProperties.Name} {DefaultConstants.FixtureLiteral} = new {fixtureProperties.Name}({fixtureProperties.ConstructorParameters});" : string.Empty)}
 {(_builder.IsDefaultConstructorOverriden ? string.Empty : GenerateConstructor(_builder.Name, _entity, _fixtureConfiguration))}
 {_propertiesStringGenerator.GeneratePropertiesCode()}
 {(_builder.IsBuildMethodOverriden ? string.Empty : _entity.GenerateBuildsCode(_builder.ShouldGenerateMethodsForUnreachableProperties))}

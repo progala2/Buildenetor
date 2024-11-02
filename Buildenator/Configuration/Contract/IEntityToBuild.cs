@@ -12,9 +12,9 @@ internal interface IEntityToBuild : IAdditionalNamespacesProvider
     string Name { get; }
     EntityToBuild.Constructor? ConstructorToBuild { get; }
     IEnumerable<BuildenatorDiagnostic> Diagnostics { get; }
-    IReadOnlyList<ITypedSymbol> AllUniqueSettablePropertiesAndParameters { get; }
+    IReadOnlyList<TypedSymbol> AllUniqueSettablePropertiesAndParameters { get; }
 
     string GenerateBuildsCode(bool shouldGenerateMethodsForUnreachableProperties);
     string GenerateDefaultBuildsCode();
-    IReadOnlyList<ITypedSymbol> AllUniqueReadOnlyPropertiesWithoutConstructorsParametersMatch { get; }
+    IReadOnlyList<TypedSymbol> AllUniqueReadOnlyPropertiesWithoutConstructorsParametersMatch { get; }
 }

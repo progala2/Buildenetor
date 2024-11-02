@@ -1,20 +1,23 @@
 ﻿using Buildenator.Abstraction;
-using Buildenator.Configuration.Contract;
 using Microsoft.CodeAnalysis;
-using System;
 using System.Collections.Immutable;
 using Buildenator.Extensions;
+using Buildenator.Generators;
+using System.Linq;
 
 namespace Buildenator.Configuration;
 
-internal readonly struct MockingProperties : IMockingProperties
+internal readonly record struct MockingProperties(
+        MockingInterfacesStrategy Strategy,
+        string TypeDeclarationFormat,
+        string FieldDefaultValueAssignmentFormat,
+        string ReturnObjectFormat,
+        in ImmutableArray<string> AdditionalNamespaces) : IAdditionalNamespacesProvider
 {
     public static MockingProperties? CreateOrDefault(
-        ImmutableArray<TypedConstant>? globalProperties,
-        ImmutableArray<TypedConstant>? localMockingProperties)
+        in ImmutableArray<TypedConstant>? localMockingProperties)
     {
-            
-        if ((localMockingProperties ?? globalProperties) is not { } attributeParameters)
+        if (localMockingProperties is not { } attributeParameters)
             return null;
 
         var strategy = attributeParameters.GetOrThrow<MockingInterfacesStrategy>(0, nameof(Strategy));
@@ -28,27 +31,27 @@ internal readonly struct MockingProperties : IMockingProperties
             typeDeclarationFormat,
             defaultValueAssignmentFormat,
             returnObjectFormat,
-            additionalNamespaces?.Split(',') ?? Array.Empty<string>());
+            (additionalNamespaces?.Split(',') ?? []).ToImmutableArray());
     }
+    public static MockingProperties? CreateOrDefault(
+        in MockingProperties? globalProperties,
+        in MockingProperties? localMockingProperties) => 
+        localMockingProperties switch
+        {
+            { } notNullProperties => notNullProperties,
+            null => globalProperties
+        };
 
-    private MockingProperties(
-        MockingInterfacesStrategy strategy,
-        string typeDeclarationFormat,
-        string fieldDefaultValueAssignmentFormat,
-        string returnObjectFormat,
-        string[] additionalNamespaces)
+    public bool Equals(MockingProperties other)
     {
-        Strategy = strategy;
-        TypeDeclarationFormat = typeDeclarationFormat;
-        FieldDefaultValueAssignmentFormat = fieldDefaultValueAssignmentFormat;
-        ReturnObjectFormat = returnObjectFormat;
-        AdditionalNamespaces = additionalNamespaces;
+        return other.Strategy == Strategy && other.TypeDeclarationFormat == TypeDeclarationFormat
+            && other.FieldDefaultValueAssignmentFormat == FieldDefaultValueAssignmentFormat
+            && other.ReturnObjectFormat == ReturnObjectFormat
+            && other.AdditionalNamespaces.SequenceEqual(AdditionalNamespaces);
     }
 
-    public MockingInterfacesStrategy Strategy { get; }
-    public string TypeDeclarationFormat { get; }
-    public string FieldDefaultValueAssignmentFormat { get; }
-    public string ReturnObjectFormat { get; }
-    public string[] AdditionalNamespaces { get; }
-
+    public override int GetHashCode()
+    {
+        return base.GetHashCode();
+    }
 }
